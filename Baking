@@ -10,6 +10,7 @@
 <!-- Firebase (persistencia en Firestore) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <style>
   :root{
     --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --border:#2a2f3a;
@@ -332,6 +333,22 @@
 </head>
 <body>
 
+<!-- ===================== PANTALLA DE INICIO DE SESION ===================== -->
+<div id="loginOverlay" style="position:fixed; inset:0; background:radial-gradient(circle at top left,#161a22,#0b0d12 60%); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:32px; max-width:360px; width:100%;">
+    <h2 style="margin-top:0;">Iniciar sesion</h2>
+    <p style="color:var(--muted); font-size:13px; margin-top:0;">Acceso restringido. Ingresa con tu usuario autorizado para ver y cargar datos.</p>
+    <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Correo</label>
+    <input type="email" id="loginEmail" style="width:100%; margin-bottom:12px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 12px; font-size:13.5px;" autocomplete="username">
+    <label style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Contrasena</label>
+    <input type="password" id="loginPassword" style="width:100%; margin-bottom:16px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 12px; font-size:13.5px;" autocomplete="current-password">
+    <button id="loginBtn" style="width:100%; background:var(--accent); color:#0f1115; font-weight:700; border:none; border-radius:8px; padding:11px; font-size:14px; cursor:pointer;">Entrar</button>
+    <p id="loginError" style="color:var(--bad); font-size:12.5px; margin-bottom:0; min-height:16px;"></p>
+  </div>
+</div>
+
+<div id="appContent" style="display:none;">
+
 <div class="float-controls" id="floatControls">
   <button class="reset-btn" id="unifyBtn" style="background:var(--panel); border-color:var(--accent); color:var(--accent); font-weight:600;">Unificar con datos de maquina Baking</button>
   <button class="reset-btn" id="goScreen2Btn" style="display:none; background:var(--accent); color:#0f1115; font-weight:600;">Ver analisis de temperatura &#8594;</button>
@@ -371,7 +388,10 @@
 <h1>Analisis de Baking - Origen de Linea y Fallos de Temperatura</h1>
 <div class="subtitle">Sube el reporte (.xlsx o .csv) para generar el analisis completo automaticamente. Todas las unidades listadas aqui fallaron en la prueba (self-check) realizada despues del baking.</div>
 
-<div id="dbStatus" style="max-width:1200px;margin:0 auto 14px;text-align:center;color:var(--muted);font-size:13px;"></div>
+<div style="max-width:1200px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;">
+  <div id="dbStatus" style="text-align:center;color:var(--muted);font-size:13px;"></div>
+  <button id="logoutBtn" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Cerrar sesion</button>
+</div>
 
 <div class="upload-zone" id="dropZone">
   <p><strong>Haz clic para elegir el archivo</strong> o arrastralo aqui</p>
@@ -694,6 +714,8 @@
   </div>
 </div>
 
+</div><!-- fin #appContent -->
+
 <script>
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
@@ -717,12 +739,60 @@ const firebaseConfig = {
 const MAIN_COLLECTION = 'baking_main';
 const FAILS_COLLECTION = 'baking_fails';
 let db = null;
+let auth = null;
 try{
   firebase.initializeApp(firebaseConfig);
   db = firebase.firestore();
+  auth = firebase.auth();
 }catch(e){
   console.error('Error inicializando Firebase:', e);
 }
+
+// ---- Autenticacion: bloquea toda la app hasta iniciar sesion ----
+const loginOverlay = document.getElementById('loginOverlay');
+const appContent = document.getElementById('appContent');
+const loginBtn = document.getElementById('loginBtn');
+const loginEmail = document.getElementById('loginEmail');
+const loginPassword = document.getElementById('loginPassword');
+const loginError = document.getElementById('loginError');
+
+function doLogin(){
+  loginError.textContent = '';
+  const email = loginEmail.value.trim();
+  const pass = loginPassword.value;
+  if(!email || !pass){ loginError.textContent = 'Ingresa correo y contrasena.'; return; }
+  loginBtn.disabled = true;
+  loginBtn.textContent = 'Entrando...';
+  auth.signInWithEmailAndPassword(email, pass)
+    .catch(err=>{
+      console.error(err);
+      let msg = 'No se pudo iniciar sesion. Verifica tus datos.';
+      if(err.code === 'auth/invalid-email') msg = 'Correo invalido.';
+      if(err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = 'Correo o contrasena incorrectos.';
+      if(err.code === 'auth/too-many-requests') msg = 'Demasiados intentos. Espera unos minutos.';
+      loginError.textContent = msg;
+    })
+    .finally(()=>{
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Entrar';
+    });
+}
+document.getElementById('logoutBtn').addEventListener('click', ()=>{ auth.signOut(); });
+loginBtn.addEventListener('click', doLogin);
+loginPassword.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+loginEmail.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+
+auth.onAuthStateChanged(user=>{
+  if(user){
+    loginOverlay.style.display = 'none';
+    appContent.style.display = 'block';
+    loginEmail.value=''; loginPassword.value='';
+    loadFromFirestore();
+  } else {
+    loginOverlay.style.display = 'flex';
+    appContent.style.display = 'none';
+  }
+});
 
 function updateSyncStatus(msg, isError){
   const el = document.getElementById('dbStatus');
@@ -2713,9 +2783,6 @@ function renderChartAndTableCore(rows, title){
     </tr>`;
   }).join('');
 }
-
-// Al abrir la pagina, carga automaticamente el historial guardado en Firestore.
-loadFromFirestore();
 </script>
 </body>
 </html>
